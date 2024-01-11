@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats-test
+  namespace: nats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats-test
+  template:
+    metadata:
+      labels:
+        app: nats-test
+    spec:
+      containers:
+      - image: github.com/yoadey/nats-test:v0.0.1
+        imagePullPolicy: IfNotPresent
+        name: nats-test
+        env:
+          - name: NATS_URL
+            value: nats://nats
+        resources:
+          requests:
+            cpu: 500m
+            memory: 100M
+          limits:
+            cpu: 500m
+            memory: 100M
