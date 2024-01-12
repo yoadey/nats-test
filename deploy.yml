@@ -1,9 +1,70 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restart-statefulset-role
+  namespace: nats
+rules:
+- apiGroups: ["apps"]
+  resources: ["statefulsets"]
+  verbs: ["get","patch"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: restart-statefulset-sa
+  namespace: nats
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restart-statefulset-rolebinding
+  namespace: nats
+subjects:
+- kind: ServiceAccount
+  name: restart-statefulset-sa
+  namespace: nats
+roleRef:
+  kind: Role
+  name: restart-statefulset-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restart-nats-statefulset
+  namespace: nats
+spec:
+  # By default they are scaled down, so they can be started manually
+  replicas: 0
+  selector:
+    matchLabels:
+      app: restart-nats-statefulset
+  template:
+    metadata:
+      labels:
+        app: restart-nats-statefulset
+    spec:
+      serviceAccountName: restart-statefulset-sa
+      containers:
+      - name: restart-container
+        image: bitnami/kubectl
+        command: ["/bin/sh", "-c", "while true; do kubectl rollout restart statefulset nats -n nats; sleep 150; done"]
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 500m
+            memory: 100M
+          limits:
+            cpu: 500m
+            memory: 100M
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nats-test
   namespace: nats
 spec:
+  # By default they are scaled down, so they can be started manually
   replicas: 1
   selector:
     matchLabels:
@@ -14,12 +75,14 @@ spec:
         app: nats-test
     spec:
       containers:
-      - image: github.com/yoadey/nats-test:v0.0.1
+      - name: nats-test
+        image: ghcr.io/yoadey/nats-test:main
         imagePullPolicy: IfNotPresent
-        name: nats-test
         env:
           - name: NATS_URL
             value: nats://nats
+          - name: NATS_KVSTORE_NAME
+            value: testkv
         resources:
           requests:
             cpu: 500m

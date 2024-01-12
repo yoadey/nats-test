@@ -1,0 +1,28 @@
+config:
+  cluster:
+    enabled: true
+  jetstream:
+    enabled: true
+    fileStore:
+      pvc:
+        size: 10Gi
+        storageClassName: <storage-class>
+  merge:
+    accounts:
+      $SYS:
+        users:
+        - password: pass
+          user: sys
+    # debug: true
+    # trace: true
+container:
+  env:
+    GOMEMLIMIT: 1500MiB
+  merge:
+    resources:
+      limits:
+        cpu: 500m
+        memory: 2Gi
+      requests:
+        cpu: 100m
+        memory: 128Mi
