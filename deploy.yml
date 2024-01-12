@@ -65,7 +65,7 @@ metadata:
   namespace: nats
 spec:
   # By default they are scaled down, so they can be started manually
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: nats-test
