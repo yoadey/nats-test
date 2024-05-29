@@ -95,24 +95,35 @@ func getOrCreateKvStore(kvname string) (nats.KeyValue, error) {
 	}
 }
 
+func Abs(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 var counter int64
 var errorCounter int64
 
-func keyUpdater(kvname string, key string) {
+func keyUpdater(kvname string, numKeys int) {
 
 	kv, err := getOrCreateKvStore(kvname)
 	if err != nil {
 		log.Fatalf("[%s]:%v", kvname, err)
 	}
-	_, err = kv.Create(key, createData(160))
-	if err != nil {
-		log.Printf("Could not create key %s/%s, it may already exist. Ignoring, error was: %s", kvname, key, err)
+
+	for i := 0; i < numKeys; i++ {
+		key := fmt.Sprintf("key-%d", i)
+		kv.Create(key, createData(160))
 	}
 
-	log.Printf("run updater for %s/%s", kvname, key)
+	log.Printf("run updater for bucket %s", kvname)
 	var lastData []byte
 	var revision uint64
 	for {
+		r := rand.Intn(numKeys)
+		key := fmt.Sprintf("key-%d", r)
+
 		var k nats.KeyValueEntry
 		for i := 0; i < 5; i++ {
 			nextk, err := kv.Get(key)
@@ -123,7 +134,7 @@ func keyUpdater(kvname string, key string) {
 					log.Printf("KEY NOT FOUND: [%s] - [%s]", key, err)
 				}
 			} else {
-				if k != nil && k.Revision() > nextk.Revision() {
+				if k != nil && Abs(int64(k.Revision())-int64(nextk.Revision())) > 2 {
 					log.Printf("get-revision-error:[%s] [%d] [%d]", key, k.Revision(), nextk.Revision())
 				}
 				k = nextk
@@ -134,26 +145,35 @@ func keyUpdater(kvname string, key string) {
 			log.Printf("get-error:[%s] %v", key, err)
 			atomic.AddInt64(&errorCounter, 1)
 		} else {
-			if revision != 0 && k.Revision() < revision {
-				log.Printf("revision-error: [%s] is:[%d] expected:[%d]", key, k.Revision(), revision)
-			}
-			if lastData != nil && k.Revision() == revision && slices.Compare(lastData, k.Value()) != 0 {
-				log.Printf("data loss [%s][rev:%d] expected:[%v] is:[%v]", key, revision, string(lastData), string(k.Value()))
+			if revision != 0 && Abs(int64(k.Revision())-int64(revision)) > 2 {
+				log.Printf("revision-error: [%s/%s] is:[%d] expected:[%d]", kvname, key, k.Revision(), revision)
+			} else if lastData != nil && k.Revision() == revision && slices.Compare(lastData, k.Value()) != 0 {
+				log.Printf("data loss [%s/%s][rev:%d] expected:[%v] is:[%v]", kvname, key, revision, string(lastData), string(k.Value()))
 			}
 
 			newData := createData(160)
 			revision, err = kv.Update(key, newData, k.Revision())
 			if err != nil {
-				log.Printf("update-error [%s][rev:%d/delta:%d]: %v", key, k.Revision(), k.Delta(), err)
+				log.Printf("update-error [%s/%s][rev:%d/delta:%d]: %v", kvname, key, k.Revision(), k.Delta(), err)
 				atomic.AddInt64(&errorCounter, 1)
 			} else {
 				lastData = newData
 			}
 			atomic.AddInt64(&counter, 1)
 		}
-		// Sleep at least a little bit to not have to much load
-		r := rand.Intn(100)
-		time.Sleep(time.Duration(r) * time.Microsecond)
+	}
+}
+
+func envOrDefault(envName string, defaultVal int) int {
+	envValue, streamCountPresent := os.LookupEnv(envName)
+	if streamCountPresent {
+		i64, err := strconv.ParseInt(envValue, 10, 32)
+		if err != nil {
+			panic(err)
+		}
+		return int(i64)
+	} else {
+		return defaultVal
 	}
 }
 
@@ -162,22 +182,14 @@ func main() {
 	log.Print("nats-test-app ...")
 
 	start := time.Now()
-	key := "Key1"
 
 	streamPrefix := env("STREAM_PREFIX")
 
-	streamCount := 100
-	streamCountString, streamCountPresent := os.LookupEnv("NUM_STREAMS")
-	if streamCountPresent {
-		i64, err := strconv.ParseInt(streamCountString, 10, 32)
-		if err != nil {
-			panic(err)
-		}
-		streamCount = int(i64)
-	}
+	streamCount := envOrDefault("NUM_STREAMS", 100)
+	keysCount := envOrDefault("NUM_KEYS", 100)
 
 	for i := 0; i < streamCount; i++ {
-		go keyUpdater(fmt.Sprintf("%s-%d", streamPrefix, i), key)
+		go keyUpdater(fmt.Sprintf("%s-%d", streamPrefix, i), keysCount)
 	}
 
 	for {

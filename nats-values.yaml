@@ -32,4 +32,4 @@ promExporter:
     enabled: true
     merge:
       labels:
-        app.kubernetes.io/monitoring: kube-prometheus-stack
+        release: kube-prometheus-stack
