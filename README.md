@@ -9,10 +9,9 @@
 helm repo add nats https://nats-io.github.io/k8s/helm/charts/
 helm --kube-context <context> --namespace nats --install --create-namespace upgrade nats nats/nats --version 1.1.6 -f nats-values.yaml
 ```
-3. Execute the following commands in nats-box to create the KV store:
+3. If there were already kvstores, you may need to delete them, they are automatically recreated:
 ```
-nats kv rm testkv -f
-nats kv add --replicas=3 --storage=file testkv
+nats kv rm <kvstorename> -f
 ```
 4. Deploy the nats-test by applying the `deploy.yml` file:
 ```kubectl --context <context> apply -f deploy.yml```

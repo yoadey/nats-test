@@ -26,3 +26,10 @@ container:
       requests:
         cpu: 100m
         memory: 128Mi
+promExporter:
+  enabled: true
+  podMonitor:
+    enabled: true
+    merge:
+      labels:
+        app.kubernetes.io/monitoring: kube-prometheus-stack

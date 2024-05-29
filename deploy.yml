@@ -79,6 +79,10 @@ spec:
         image: ghcr.io/yoadey/nats-test:main
         imagePullPolicy: IfNotPresent
         env:
+          - name: STREAM_PREFIX
+            value: kvstore
+          - name: NUM_STREAMS
+            value: "500"
           - name: NATS_URL
             value: nats://nats
           - name: NATS_KVSTORE_NAME

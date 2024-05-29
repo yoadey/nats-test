@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -60,8 +62,6 @@ func connect() nats.JetStreamContext {
 	return js
 }
 
-var kvname = env("NATS_KVSTORE_NAME")
-
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 func createData(n int) []byte {
@@ -72,23 +72,44 @@ func createData(n int) []byte {
 	return b
 }
 
+func getOrCreateKvStore(kvname string) (nats.KeyValue, error) {
+	js := connect()
+
+	kvExists := false
+	existingKvnames := js.KeyValueStoreNames()
+	for existingKvname := range existingKvnames {
+		if existingKvname == kvname {
+			kvExists = true
+			break
+		}
+	}
+	if !kvExists {
+		log.Printf("Creating kv store %s", kvname)
+		return js.CreateKeyValue(&nats.KeyValueConfig{
+			Bucket:   kvname,
+			Replicas: 3,
+			Storage:  nats.FileStorage,
+		})
+	} else {
+		return js.KeyValue(kvname)
+	}
+}
+
 var counter int64
 var errorCounter int64
 
-func keyUpdater(key string) {
-	js := connect()
-	kv, err := js.KeyValue(kvname)
+func keyUpdater(kvname string, key string) {
+
+	kv, err := getOrCreateKvStore(kvname)
 	if err != nil {
 		log.Fatalf("[%s]:%v", kvname, err)
 	}
 	_, err = kv.Create(key, createData(160))
 	if err != nil {
-		log.Printf("Could not create key %s, it may already exist. Ignoring, error was: %s", key, err)
+		log.Printf("Could not create key %s/%s, it may already exist. Ignoring, error was: %s", kvname, key, err)
 	}
 
-	log.Print("create data...")
-
-	log.Printf("run updater for %s", key)
+	log.Printf("run updater for %s/%s", kvname, key)
 	var lastData []byte
 	var revision uint64
 	for {
@@ -130,6 +151,9 @@ func keyUpdater(key string) {
 			}
 			atomic.AddInt64(&counter, 1)
 		}
+		// Sleep at least a little bit to not have to much load
+		r := rand.Intn(100)
+		time.Sleep(time.Duration(r) * time.Microsecond)
 	}
 }
 
@@ -140,7 +164,21 @@ func main() {
 	start := time.Now()
 	key := "Key1"
 
-	go keyUpdater(key)
+	streamPrefix := env("STREAM_PREFIX")
+
+	streamCount := 100
+	streamCountString, streamCountPresent := os.LookupEnv("NUM_STREAMS")
+	if streamCountPresent {
+		i64, err := strconv.ParseInt(streamCountString, 10, 32)
+		if err != nil {
+			panic(err)
+		}
+		streamCount = int(i64)
+	}
+
+	for i := 0; i < streamCount; i++ {
+		go keyUpdater(fmt.Sprintf("%s-%d", streamPrefix, i), key)
+	}
 
 	for {
 		log.Printf("writes: %d errors: %d (%s)", atomic.LoadInt64(&counter), atomic.LoadInt64(&errorCounter), time.Since(start).Truncate(time.Second))
