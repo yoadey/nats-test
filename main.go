@@ -128,14 +128,14 @@ func keyUpdater(kvname string, numKeys int) {
 		for i := 0; i < 5; i++ {
 			nextk, err := kv.Get(key)
 			if err != nil {
-				log.Printf("get-error:[%s] %v", key, err)
+				log.Printf("get-error: [%s/%s] %v", kvname, key, err)
 				atomic.AddInt64(&errorCounter, 1)
 				if err == nats.ErrKeyNotFound {
-					log.Printf("KEY NOT FOUND: [%s] - [%s]", key, err)
+					log.Printf("KEY NOT FOUND: [%s/%s] - [%s]", kvname, key, err)
 				}
 			} else {
 				if k != nil && Abs(int64(k.Revision())-int64(nextk.Revision())) > 2 {
-					log.Printf("get-revision-error:[%s] [%d] [%d]", key, k.Revision(), nextk.Revision())
+					log.Printf("get-revision-error:[%s/%s] [%d] [%d]", kvname, key, k.Revision(), nextk.Revision())
 				}
 				k = nextk
 			}
