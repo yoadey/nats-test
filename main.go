@@ -119,7 +119,7 @@ func keyUpdater(kvname string, numKeys int) {
 
 	log.Printf("run updater for bucket %s", kvname)
 	var lastData []byte
-	var revision uint64
+	revisions := make(map[string]uint64)
 	for {
 		r := rand.Intn(numKeys)
 		key := fmt.Sprintf("key-%d", r)
@@ -145,14 +145,14 @@ func keyUpdater(kvname string, numKeys int) {
 			log.Printf("get-error:[%s] %v", key, err)
 			atomic.AddInt64(&errorCounter, 1)
 		} else {
-			if revision != 0 && Abs(int64(k.Revision())-int64(revision)) > 2 {
-				log.Printf("revision-error: [%s/%s] is:[%d] expected:[%d]", kvname, key, k.Revision(), revision)
-			} else if lastData != nil && k.Revision() == revision && slices.Compare(lastData, k.Value()) != 0 {
-				log.Printf("data loss [%s/%s][rev:%d] expected:[%v] is:[%v]", kvname, key, revision, string(lastData), string(k.Value()))
+			if revisions[key] != 0 && Abs(int64(k.Revision())-int64(revisions[key])) > 2 {
+				log.Printf("revision-error: [%s/%s] is:[%d] expected:[%d]", kvname, key, k.Revision(), revisions[key])
+			} else if lastData != nil && k.Revision() == revisions[key] && slices.Compare(lastData, k.Value()) != 0 {
+				log.Printf("data loss [%s/%s][rev:%d] expected:[%v] is:[%v]", kvname, key, revisions[key], string(lastData), string(k.Value()))
 			}
 
 			newData := createData(160)
-			revision, err = kv.Update(key, newData, k.Revision())
+			revisions[key], err = kv.Update(key, newData, k.Revision())
 			if err != nil {
 				log.Printf("update-error [%s/%s][rev:%d/delta:%d]: %v", kvname, key, k.Revision(), k.Delta(), err)
 				atomic.AddInt64(&errorCounter, 1)
