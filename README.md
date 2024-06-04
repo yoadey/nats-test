@@ -7,7 +7,7 @@
 2. Deploy NATS to the cluster in the NATS namespace
 ```
 helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-helm --kube-context <context> --namespace nats --install --create-namespace upgrade nats nats/nats --version 1.1.6 -f nats-values.yaml
+helm --kube-context <context> --namespace nats --install --create-namespace upgrade nats nats/nats --version 1.1.12 -f nats-values.yaml
 ```
 3. If there were already kvstores, you may need to delete them, they are automatically recreated:
 ```
