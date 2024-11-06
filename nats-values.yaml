@@ -6,7 +6,7 @@ config:
     fileStore:
       pvc:
         size: 10Gi
-        storageClassName: <storage-class>
+        storageClassName: ionos-enterprise-ssd
   merge:
     accounts:
       $SYS:
@@ -26,6 +26,19 @@ container:
       requests:
         cpu: 100m
         memory: 128Mi
+statefulSet:
+  merge:
+    spec:
+      template:
+        spec:
+          initContainers:
+          - command:
+            - sh
+            - -c
+            - sleep 300
+            image: busybox:1.28
+            imagePullPolicy: IfNotPresent
+            name: delay-startup
 promExporter:
   enabled: true
   podMonitor:
