@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -72,24 +74,51 @@ func createData(n int) []byte {
 	return b
 }
 
+var l sync.Mutex
+var allKvStoreNames []*string
+
+func getKeyStores(js nats.JetStreamContext) []*string {
+	l.Lock()
+	if len(allKvStoreNames) == 0 {
+		kvStoreNames := js.KeyValueStoreNames()
+		i := 0
+		for existingKvname := range kvStoreNames {
+			allKvStoreNames = append(allKvStoreNames, &existingKvname)
+			i = i + 1
+		}
+	}
+	l.Unlock()
+	return allKvStoreNames
+}
+
 func getOrCreateKvStore(kvname string) (nats.KeyValue, error) {
 	js := connect()
 
 	kvExists := false
-	existingKvnames := js.KeyValueStoreNames()
-	for existingKvname := range existingKvnames {
-		if existingKvname == kvname {
+	existingKvnames := getKeyStores(js)
+	for _, existingKvname := range existingKvnames {
+		if *existingKvname == kvname {
 			kvExists = true
 			break
 		}
 	}
 	if !kvExists {
 		log.Printf("Creating kv store %s", kvname)
-		return js.CreateKeyValue(&nats.KeyValueConfig{
-			Bucket:   kvname,
-			Replicas: 3,
-			Storage:  nats.FileStorage,
-		})
+		for retries := range 3 {
+			kv, err := js.CreateKeyValue(&nats.KeyValueConfig{
+				Bucket:   kvname,
+				Replicas: 3,
+				Storage:  nats.FileStorage,
+			})
+			if err == nil {
+				return kv, nil
+			} else {
+				log.Printf("Creating kv store %s failed, retrying...", kvname)
+			}
+
+			log.Printf("Creating kv store %s failed, retrying %d/3...", kvname, retries)
+		}
+		return nil, fmt.Errorf("Could not create kvstore %s!", kvname)
 	} else {
 		return js.KeyValue(kvname)
 	}
@@ -106,15 +135,25 @@ var counter int64
 var errorCounter int64
 
 func keyUpdater(kvname string, numKeys int) {
+	defer log.Printf("Thread for kvstore [%s] had an error and quit", kvname)
 
 	kv, err := getOrCreateKvStore(kvname)
 	if err != nil {
 		log.Fatalf("[%s]:%v", kvname, err)
 	}
 
+	creation:
 	for i := 0; i < numKeys; i++ {
 		key := fmt.Sprintf("key-%d", i)
-		kv.Create(key, createData(160))
+
+		for retries := range 3 {
+			_, err := kv.Create(key, createData(160))
+			if err != nil && !strings.Contains(err.Error(), "key exists") {
+				log.Printf("Creating entry %s %s failed, retrying %d/3...", kvname, key, retries)
+			} else {
+				continue creation
+			}
+		}
 	}
 
 	log.Printf("run updater for bucket %s", kvname)
@@ -128,14 +167,14 @@ func keyUpdater(kvname string, numKeys int) {
 		for i := 0; i < 5; i++ {
 			nextk, err := kv.Get(key)
 			if err != nil {
-				log.Printf("get-error: [%s/%s] %v", kvname, key, err)
+				log.Printf("GET ERROR: [%s %s] %v", kvname, key, err)
 				atomic.AddInt64(&errorCounter, 1)
 				if err == nats.ErrKeyNotFound {
-					log.Printf("KEY NOT FOUND: [%s/%s] - [%s]", kvname, key, err)
+					log.Printf("KEY NOT FOUND: [%s %s] - [%s]", kvname, key, err)
 				}
 			} else {
 				if k != nil && Abs(int64(k.Revision())-int64(nextk.Revision())) > 2 {
-					log.Printf("get-revision-error:[%s/%s] [%d] [%d]", kvname, key, k.Revision(), nextk.Revision())
+					log.Printf("GET REVISION ERROR: [%s %s] [%d] [%d]", kvname, key, k.Revision(), nextk.Revision())
 				}
 				k = nextk
 			}
@@ -146,7 +185,7 @@ func keyUpdater(kvname string, numKeys int) {
 			atomic.AddInt64(&errorCounter, 1)
 		} else {
 			if revisions[key] != 0 && Abs(int64(k.Revision())-int64(revisions[key])) > 2 {
-				log.Printf("revision-error: [%s/%s] is:[%d] expected:[%d]", kvname, key, k.Revision(), revisions[key])
+				log.Printf("REVISION ERROR: [%s %s] is:[%d] expected:[%d]", kvname, key, k.Revision(), revisions[key])
 			} else {
 				lastDataVal, ok := lastData[key]
 				if ok && k.Revision() == revisions[key] && slices.Compare(lastDataVal, k.Value()) != 0 {
