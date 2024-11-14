@@ -157,8 +157,11 @@ func keyUpdater(kvname string, numKeys int) {
 	}
 
 	log.Printf("run updater for bucket %s", kvname)
-	lastData := make(map[string][]byte)
-	revisions := make(map[string]uint64)
+	lastData := make(map[string]struct {
+		revision uint64
+		data     []byte
+		updated  time.Time
+	})
 	for {
 		r := rand.Intn(numKeys)
 		key := fmt.Sprintf("key-%d", r)
@@ -181,25 +184,34 @@ func keyUpdater(kvname string, numKeys int) {
 		}
 		k, err := kv.Get(key)
 		if err != nil {
-			log.Printf("get-error:[%s] %v", key, err)
+			log.Printf("GET ERROR:[%s] %v", key, err)
 			atomic.AddInt64(&errorCounter, 1)
 		} else {
-			if revisions[key] != 0 && Abs(int64(k.Revision())-int64(revisions[key])) > 2 {
-				log.Printf("REVISION ERROR: [%s %s] is:[%d] expected:[%d]", kvname, key, k.Revision(), revisions[key])
-			} else {
-				lastDataVal, ok := lastData[key]
-				if ok && k.Revision() == revisions[key] && slices.Compare(lastDataVal, k.Value()) != 0 {
-					log.Printf("data loss [%s/%s][rev:%d] expected:[%v] is:[%v]", kvname, key, revisions[key], string(lastDataVal), string(k.Value()))
-				}
+			lastDataVal, ok := lastData[key]
+			if ok && k.Revision() != lastDataVal.revision {
+				log.Printf("REVISION ERROR: [%s %s][%dms old] is:[%d] expected:[%d], dataDiff: %t",
+					kvname, key, time.Now().Sub(lastDataVal.updated).Milliseconds(), k.Revision(), lastDataVal.revision, slices.Compare(lastDataVal.data, k.Value()) != 0)
+			} else if ok && slices.Compare(lastDataVal.data, k.Value()) != 0 {
+				log.Printf("DATA LOSS [%s/%s][rev:%d][%dms old] is:[%v] expected:[%v]",
+					kvname, key, time.Now().Sub(lastDataVal.updated).Milliseconds(), lastDataVal.revision, string(k.Value()), string(lastDataVal.data))
 			}
 
 			newData := createData(160)
-			revisions[key], err = kv.Update(key, newData, k.Revision())
+			time.Now()
+			newRevision, err := kv.Update(key, newData, k.Revision())
 			if err != nil {
-				log.Printf("update-error [%s/%s][rev:%d/delta:%d]: %v", kvname, key, k.Revision(), k.Delta(), err)
+				log.Printf("UPDATE ERROR: [%s/%s][rev:%d/delta:%d]: %v", kvname, key, k.Revision(), k.Delta(), err)
 				atomic.AddInt64(&errorCounter, 1)
 			} else {
-				lastData[key] = newData
+				lastData[key] = struct {
+					revision uint64
+					data     []byte
+					updated  time.Time
+				}{
+					revision: newRevision,
+					data:     newData,
+					updated:  time.Now(),
+				}
 			}
 			atomic.AddInt64(&counter, 1)
 		}
