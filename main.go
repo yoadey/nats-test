@@ -142,7 +142,7 @@ func keyUpdater(kvname string, numKeys int) {
 		log.Fatalf("[%s]:%v", kvname, err)
 	}
 
-	creation:
+creation:
 	for i := 0; i < numKeys; i++ {
 		key := fmt.Sprintf("key-%d", i)
 
@@ -177,7 +177,14 @@ func keyUpdater(kvname string, numKeys int) {
 				}
 			} else {
 				if k != nil && Abs(int64(k.Revision())-int64(nextk.Revision())) > 2 {
-					log.Printf("GET REVISION ERROR: [%s %s] [%d] [%d]", kvname, key, k.Revision(), nextk.Revision())
+					var lastUpdated int64;
+					if k.Created().After(nextk.Created()) {
+						lastUpdated = time.Now().Sub(k.Created()).Milliseconds();
+					} else {
+						lastUpdated = time.Now().Sub(nextk.Created()).Milliseconds();
+					} 
+					log.Printf("COMPARE REVISIONS ERROR: [%s %s][%dms old] [%d] [%d], dataDiff: %t",
+						kvname, key, lastUpdated, k.Revision(), nextk.Revision(), slices.Compare(k.Value(), nextk.Value()) != 0)
 				}
 				k = nextk
 			}
